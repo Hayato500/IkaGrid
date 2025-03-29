@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      1.1
+// @version      1.2
 // @description  Enhanced multi-city tracking with individual updates
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
@@ -206,7 +206,6 @@
                 top: ${this.data.position.top}px;
                 left: ${this.data.position.left}px;
                 z-index: 9999;
-                cursor: move;
             `;
             document.body.appendChild(grid);
             return grid;
@@ -228,7 +227,7 @@
                 ? Constants.IMAGE_PATHS.BUTTONS.MAXIMIZE
                 : Constants.IMAGE_PATHS.BUTTONS.MINIMIZE;
             toggleButton.style.cssText = this.data.isMinimized
-                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;'
+                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: move; z-index: 10000;'
                 : 'position: absolute; top: 25px; left: 50px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;';
             toggleButton.alt = 'Toggle minimize/maximize';
             toggleButton.onclick = () => this.toggleMinimized();
@@ -243,7 +242,7 @@
                 ? Constants.IMAGE_PATHS.BUTTONS.MAXIMIZE
                 : Constants.IMAGE_PATHS.BUTTONS.MINIMIZE;
             toggleButton.style.cssText = this.data.isMinimized
-                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;'
+                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: move; z-index: 10000;'
                 : 'position: absolute; top: 25px; left: 50px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;';
             DataManager.save(this.data);
         }
@@ -275,6 +274,7 @@
 
         addCopyright() {
             const copyright = document.createElement('div');
+            copyright.id = 'resourceGridCopyright'; // Unique ID to avoid conflicts
             copyright.className = 'copyright';
             copyright.innerHTML = '<span>By Kronos</span>';
             this.grid.appendChild(copyright);
@@ -297,6 +297,7 @@
                     min-width: 600px;
                     border: none !important;
                     box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+                    cursor: move;
                 }
 
                 #resourceGrid.minimized {
@@ -305,6 +306,7 @@
                     box-shadow: none !important;
                     width: 25px !important;
                     height: 25px !important;
+                    cursor: default !important; /* Disable dragging on the grid itself when minimized */
                 }
 
                 #resourceGrid.minimized > *:not(#toggleButton) {
@@ -362,7 +364,7 @@
                     font-family: Arial, sans-serif !important;
                 }
 
-                .copyright {
+                #resourceGridCopyright.copyright {
                     background: url(${Constants.IMAGE_PATHS.BACKGROUNDS.COPYRIGHT}) no-repeat center;
                     width: 200px;
                     height: 40px;
@@ -372,7 +374,7 @@
                     transform: translateX(-50%);
                 }
 
-                .copyright span {
+                #resourceGridCopyright.copyright span {
                     font-size: 12px !important;
                     display: block !important;
                     color: white !important;
@@ -570,7 +572,10 @@
         }
 
         startDrag(e) {
-            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'IMG') return;
+            // Only allow dragging from the toggle button when minimized, otherwise anywhere on the grid
+            const isMinimized = this.grid.classList.contains('minimized');
+            if (isMinimized && e.target.id !== 'toggleButton') return;
+            if (!isMinimized && (e.target.tagName === 'BUTTON' || e.target.tagName === 'IMG')) return;
 
             this.isDragging = true;
             this.offset = {
