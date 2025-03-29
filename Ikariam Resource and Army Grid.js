@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      1.0
-// @description  Proper multi-city tracking with individual updates
+// @version      1.1
+// @description  Enhanced multi-city tracking with individual updates
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
 // @grant        GM_addStyle
@@ -14,6 +14,8 @@
 (() => {
     'use strict';
 
+    const BASE_URL = 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main';
+
     const Constants = {
         STORAGE_KEYS: {
             DATA: 'ikariamResourceGrid',
@@ -23,22 +25,22 @@
         },
         IMAGE_PATHS: {
             BUTTONS: {
-                MINIMIZE: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Buttons/Minimize.png',
-                MAXIMIZE: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Buttons/Maximize.png',
-                SELECTED: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Buttons/Button_Standard_Selected.png',
-                DESELECTED: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Buttons/Button_Standard_Deselected.png'
+                MINIMIZE: `${BASE_URL}/Buttons/Minimize.png`,
+                MAXIMIZE: `${BASE_URL}/Buttons/Maximize.png`,
+                SELECTED: `${BASE_URL}/Buttons/Button_Standard_Selected.png`,
+                DESELECTED: `${BASE_URL}/Buttons/Button_Standard_Deselected.png`
             },
             RESOURCES: {
-                WOOD: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Resources/icon_wood.png',
-                WINE: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Resources/icon_wine.png',
-                MARBLE: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Resources/icon_marble.png',
-                CRYSTAL: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Resources/icon_glass.png',
-                SULFUR: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Resources/icon_sulfur.png'
+                WOOD: `${BASE_URL}/Resources/icon_wood.png`,
+                WINE: `${BASE_URL}/Resources/icon_wine.png`,
+                MARBLE: `${BASE_URL}/Resources/icon_marble.png`,
+                CRYSTAL: `${BASE_URL}/Resources/icon_glass.png`,
+                SULFUR: `${BASE_URL}/Resources/icon_sulfur.png`
             },
-            UNITS: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/refs/heads/main/Units/',
+            UNITS: `${BASE_URL}/Units/`,
             BACKGROUNDS: {
-                MAIN: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/',
-                COPYRIGHT: 'https://raw.githubusercontent.com/Hayato500/IkaGrid/refs/heads/main/Border/copyright.png'
+                MAIN: `${BASE_URL}/Border/`,
+                COPYRIGHT: `${BASE_URL}/Border/copyright.png`
             }
         },
         RESOURCE_TYPES: ['Wood', 'Wine', 'Marble', 'Crystal', 'Sulfur'],
@@ -74,40 +76,54 @@
 
     class DataManager {
         static load() {
-            return {
-                savedData: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.DATA)) || { resources: {}, army: {} },
-                position: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.POSITION)) || { top: 50, left: 50 },
-                isMinimized: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.MINIMIZED)) || false,
-                currentView: localStorage.getItem(Constants.STORAGE_KEYS.VIEW) || 'resources'
-            };
+            try {
+                return {
+                    savedData: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.DATA)) || { resources: {}, army: {} },
+                    position: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.POSITION)) || { top: 50, left: 50 },
+                    isMinimized: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.MINIMIZED)) ?? false,
+                    currentView: localStorage.getItem(Constants.STORAGE_KEYS.VIEW) || 'resources'
+                };
+            } catch (error) {
+                console.error('Failed to load data:', error);
+                return {
+                    savedData: { resources: {}, army: {} },
+                    position: { top: 50, left: 50 },
+                    isMinimized: false,
+                    currentView: 'resources'
+                };
+            }
         }
 
         static save(data) {
-            localStorage.setItem(Constants.STORAGE_KEYS.DATA, JSON.stringify(data.savedData));
-            localStorage.setItem(Constants.STORAGE_KEYS.POSITION, JSON.stringify(data.position));
-            localStorage.setItem(Constants.STORAGE_KEYS.MINIMIZED, JSON.stringify(data.isMinimized));
-            localStorage.setItem(Constants.STORAGE_KEYS.VIEW, data.currentView);
+            try {
+                localStorage.setItem(Constants.STORAGE_KEYS.DATA, JSON.stringify(data.savedData));
+                localStorage.setItem(Constants.STORAGE_KEYS.POSITION, JSON.stringify(data.position));
+                localStorage.setItem(Constants.STORAGE_KEYS.MINIMIZED, JSON.stringify(data.isMinimized));
+                localStorage.setItem(Constants.STORAGE_KEYS.VIEW, data.currentView);
+            } catch (error) {
+                console.error('Failed to save data:', error);
+            }
         }
     }
 
     class CityManager {
         static getCurrentCityName() {
-            return $('.white#js_cityBread').text().trim();
+            return $('.white#js_cityBread').text().trim() || 'Unknown City';
         }
 
         static getAllCities() {
             try {
                 return Object.values(dataSetForView.relatedCityData)
-                    .filter(city => city.name)
+                    .filter(city => city?.name)
                     .map(city => city.name);
-            } catch (e) {
+            } catch {
                 return [this.getCurrentCityName()];
             }
         }
 
         static getCurrentResources() {
             return Constants.RESOURCE_TYPES.reduce((acc, resource) => {
-                acc[resource] = parseInt($(`#js_GlobalMenu_${resource.toLowerCase()}`).text().replace(/,/g, '') || 0);
+                acc[resource] = parseInt($(`#js_GlobalMenu_${resource.toLowerCase()}`).text().replace(/,/g, '')) || 0;
                 return acc;
             }, {});
         }
@@ -121,7 +137,6 @@
             document.querySelectorAll('table.militaryList').forEach(table => {
                 const headers = table.querySelectorAll('th');
                 const countRow = table.querySelector('tr.count');
-
                 if (headers && countRow) {
                     const countCells = countRow.querySelectorAll('td');
                     headers.forEach((header, index) => {
@@ -140,29 +155,39 @@
             return army;
         }
 
-        static changeCity(cityName, dataSet) {
+        static async changeCity(cityName, dataSet) {
             const cityInfo = Object.values(dataSet.relatedCityData).find(city => city.name === cityName);
-            if (!cityInfo?.id) return;
+            if (!cityInfo?.id) {
+                console.warn(`City "${cityName}" not found`);
+                return;
+            }
 
-            const postData = {
+            const postData = new URLSearchParams({
                 action: 'header',
                 function: 'changeCurrentCity',
                 actionRequest: dataSet.actionRequest,
                 cityId: cityInfo.id,
                 ajax: 1
-            };
-
-            fetch('/index.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                credentials: 'include',
-                body: new URLSearchParams(postData)
-            }).then(response => {
-                if (response.ok) window.location.reload();
             });
+
+            try {
+                const response = await fetch('/index.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include',
+                    body: postData
+                });
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    console.error('City change failed:', response.status);
+                }
+            } catch (error) {
+                console.error('Fetch error during city change:', error);
+            }
         }
     }
 
@@ -202,15 +227,10 @@
             toggleButton.src = this.data.isMinimized
                 ? Constants.IMAGE_PATHS.BUTTONS.MAXIMIZE
                 : Constants.IMAGE_PATHS.BUTTONS.MINIMIZE;
-            toggleButton.style.cssText = `
-                position: absolute;
-                top: 25px;
-                left: 50px;
-                width: 25px;
-                height: 25px;
-                cursor: pointer;
-                z-index: 10000;
-            `;
+            toggleButton.style.cssText = this.data.isMinimized
+                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;'
+                : 'position: absolute; top: 25px; left: 50px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;';
+            toggleButton.alt = 'Toggle minimize/maximize';
             toggleButton.onclick = () => this.toggleMinimized();
             this.grid.appendChild(toggleButton);
         }
@@ -218,20 +238,13 @@
         toggleMinimized() {
             this.grid.classList.toggle('minimized');
             this.data.isMinimized = !this.data.isMinimized;
-            const toggleButton = this.grid.querySelector('img');
+            const toggleButton = this.grid.querySelector('#toggleButton');
             toggleButton.src = this.data.isMinimized
-                ? 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Buttons/Maximize.png'
-                : 'https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Buttons/Minimize.png';
-
-            // Force redraw for minimized state
-            if(this.data.isMinimized) {
-                toggleButton.style.left = '2px';
-                toggleButton.style.top = '2px';
-            } else {
-                toggleButton.style.left = '50px';
-                toggleButton.style.top = '25px';
-            }
-
+                ? Constants.IMAGE_PATHS.BUTTONS.MAXIMIZE
+                : Constants.IMAGE_PATHS.BUTTONS.MINIMIZE;
+            toggleButton.style.cssText = this.data.isMinimized
+                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;'
+                : 'position: absolute; top: 25px; left: 50px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;';
             DataManager.save(this.data);
         }
 
@@ -247,8 +260,9 @@
                     height: 26px;
                     padding: 0;
                 `;
-                button.onclick = () => this.changeView(label.toLowerCase());
                 button.className = label.toLowerCase() === this.data.currentView ? 'selected' : 'deselected';
+                button.onclick = () => this.changeView(label.toLowerCase());
+                button.setAttribute('aria-label', `Switch to ${label} view`);
                 this.grid.appendChild(button);
             });
         }
@@ -270,26 +284,19 @@
             GM_addStyle(`
                 #resourceGrid {
                     background:
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_head_left.png') left top no-repeat,
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_head_right.png') right top no-repeat,
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_head.png') left 50px top 0 repeat-x,
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_footer_l.png') left bottom 0 no-repeat,
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_footer_r.png') right -2px bottom 0 no-repeat,
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_footer_pat.png') left bottom 0 repeat-x,
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_body_left.png') left 10px top 55px repeat-y,
-                        url('https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Border/bg_body_right.png') right 8px top 55px repeat-y,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_head_left.png') left top no-repeat,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_head_right.png') right top no-repeat,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_head.png') left 50px top 0 repeat-x,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_footer_l.png') left bottom 0 no-repeat,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_footer_r.png') right -2px bottom 0 no-repeat,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_footer_pat.png') left bottom 0 repeat-x,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_body_left.png') left 10px top 55px repeat-y,
+                        url('${Constants.IMAGE_PATHS.BACKGROUNDS.MAIN}bg_body_right.png') right 8px top 55px repeat-y,
                         #fcdbaa;
                     padding: 35px 40px 50px 40px;
                     min-width: 600px;
                     border: none !important;
                     box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
-                }
-
-                #toggleButton {
-                    position: absolute;
-                    width: 25px !important;
-                    height: 25px !important;
-                    transition: all 0.2s ease;
                 }
 
                 #resourceGrid.minimized {
@@ -306,16 +313,8 @@
                 }
 
                 #resourceGrid.minimized #toggleButton {
-                    display: block !important;
                     visibility: visible !important;
                     opacity: 1 !important;
-                    z-index: 10000 !important;
-                }
-
-                #resourceGrid.minimized table,
-                #resourceGrid.minimized button,
-                #resourceGrid.minimized .copyright {
-                    display: none !important;
                 }
 
                 #resourceGrid table {
@@ -345,14 +344,8 @@
                     cursor: pointer;
                 }
 
-                /* Optional: Add smooth transition */
-                #resourceGrid tr {
-                    transition: background-color 0.2s ease;
-                }
-
-
-                button.selected, button.deselected {
-                    background-repeat: no-repeat !important;
+                button.selected {
+                    background: url(${Constants.IMAGE_PATHS.BUTTONS.SELECTED}) no-repeat !important;
                     background-size: 100% 100% !important;
                     border: none !important;
                     color: black !important;
@@ -360,18 +353,17 @@
                     font-family: Arial, sans-serif !important;
                 }
 
-                button.selected {
-                    background-image: url(${Constants.IMAGE_PATHS.BUTTONS.SELECTED}) !important;
-                }
-
                 button.deselected {
-                    background-image: url(${Constants.IMAGE_PATHS.BUTTONS.DESELECTED}) !important;
+                    background: url(${Constants.IMAGE_PATHS.BUTTONS.DESELECTED}) no-repeat !important;
+                    background-size: 100% 100% !important;
+                    border: none !important;
+                    color: black !important;
+                    font-weight: bold !important;
+                    font-family: Arial, sans-serif !important;
                 }
 
                 .copyright {
-                    background-image: url(${Constants.IMAGE_PATHS.BACKGROUNDS.COPYRIGHT});
-                    background-repeat: no-repeat;
-                    background-position: center;
+                    background: url(${Constants.IMAGE_PATHS.BACKGROUNDS.COPYRIGHT}) no-repeat center;
                     width: 200px;
                     height: 40px;
                     position: absolute;
@@ -381,7 +373,7 @@
                 }
 
                 .copyright span {
-                    font-size: 12px !important;  /* Original was 12px */
+                    font-size: 12px !important;
                     display: block !important;
                     color: white !important;
                     font-weight: bold !important;
@@ -391,9 +383,9 @@
                 }
 
                 .unit-icon {
-                    width: 30px !important;   /* 50% reduction from original 32px */
+                    width: 30px !important;
                     height: 30px !important;
-                    object-fit: contain;      /* Maintains aspect ratio */
+                    object-fit: contain;
                 }
             `);
         }
@@ -401,13 +393,9 @@
         update() {
             const table = this.grid.querySelector('table') || document.createElement('table');
             table.innerHTML = '';
-
-            if (this.data.currentView === 'resources') {
-                this.buildResourceTable(table);
-            } else {
-                this.buildArmyTable(table);
-            }
-
+            this.data.currentView === 'resources'
+                ? this.buildResourceTable(table)
+                : this.buildArmyTable(table);
             if (!this.grid.contains(table)) this.grid.appendChild(table);
             this.updateButtonStates();
         }
@@ -420,7 +408,7 @@
 
             Constants.RESOURCE_TYPES.forEach(resource => {
                 const cell = headerRow.insertCell();
-                cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.RESOURCES[resource.toUpperCase()]}" alt="${resource}">`;
+                cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.RESOURCES[resource.toUpperCase()]}" alt="${resource}" width="20" height="20">`;
             });
 
             const totals = Constants.RESOURCE_TYPES.reduce((acc, res) => {
@@ -465,7 +453,7 @@
 
             units.forEach(unit => {
                 const cell = headerRow.insertCell();
-                cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.UNITS}${unit.replace(/ /g, '_')}.png" class="unit-icon">`;
+                cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.UNITS}${unit.replace(/ /g, '_')}.png" class="unit-icon" alt="${unit}">`;
             });
 
             const totals = units.reduce((acc, unit) => {
@@ -514,8 +502,9 @@
         constructor(gridUI) {
             this.gridUI = gridUI;
             this.lastCity = CityManager.getCurrentCityName();
-            this.lastResources = JSON.stringify(CityManager.getCurrentResources());
-            this.lastArmy = JSON.stringify({});
+            this.lastResources = CityManager.getCurrentResources();
+            this.lastArmy = CityManager.getCurrentArmy();
+            this.debounceTimeout = null;
         }
 
         start() {
@@ -530,32 +519,40 @@
 
             let needsUpdate = false;
 
-            if (currentCity !== this.lastCity || JSON.stringify(currentResources) !== this.lastResources) {
+            if (currentCity !== this.lastCity || !this.areObjectsEqual(currentResources, this.lastResources)) {
                 this.handleResourceUpdate(currentCity, currentResources);
                 needsUpdate = true;
             }
 
-            if (militaryScreen && JSON.stringify(currentArmy) !== this.lastArmy) {
+            if (militaryScreen && !this.areObjectsEqual(currentArmy, this.lastArmy)) {
                 this.handleArmyUpdate(currentCity, currentArmy);
                 needsUpdate = true;
             }
 
             if (needsUpdate) {
-                this.gridUI.update();
+                clearTimeout(this.debounceTimeout);
+                this.debounceTimeout = setTimeout(() => this.gridUI.update(), 100);
             }
         }
 
+        areObjectsEqual(obj1, obj2) {
+            const keys1 = Object.keys(obj1);
+            const keys2 = Object.keys(obj2);
+            if (keys1.length !== keys2.length) return false;
+            return keys1.every(key => obj1[key] === obj2[key]);
+        }
+
         handleResourceUpdate(city, resources) {
-            this.gridUI.data.savedData.resources[city] = resources;
+            this.gridUI.data.savedData.resources[city] = { ...resources };
             DataManager.save(this.gridUI.data);
             this.lastCity = city;
-            this.lastResources = JSON.stringify(resources);
+            this.lastResources = { ...resources };
         }
 
         handleArmyUpdate(city, army) {
-            this.gridUI.data.savedData.army[city] = army;
+            this.gridUI.data.savedData.army[city] = { ...army };
             DataManager.save(this.gridUI.data);
-            this.lastArmy = JSON.stringify(army);
+            this.lastArmy = { ...army };
         }
     }
 
@@ -587,7 +584,6 @@
 
         drag(e) {
             if (!this.isDragging) return;
-
             this.grid.style.left = `${e.clientX - this.offset.x}px`;
             this.grid.style.top = `${e.clientY - this.offset.y}px`;
         }
@@ -604,7 +600,6 @@
         }
     }
 
-    // Main initialization
     $(document).ready(() => {
         const loadedData = DataManager.load();
         const gridUI = new GridUI(loadedData);
