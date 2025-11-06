@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      1.3
+// @version      1.4
 // @description  Enhanced multi-city tracking with individual updates
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
@@ -201,6 +201,8 @@
         constructor(data) {
             this.data = data;
             this.grid = this.createGridElement();
+            this.table = null;
+            this.buttons = null;
             this.initializeGrid();
         }
 
@@ -254,7 +256,7 @@
         }
 
         addViewButtons() {
-            ['Resources', 'Army'].forEach((label, i) => {
+            this.buttons = ['Resources', 'Army'].map((label, i) => {
                 const button = document.createElement('button');
                 button.textContent = label;
                 button.style.cssText = `
@@ -269,10 +271,12 @@
                 button.onclick = () => this.changeView(label.toLowerCase());
                 button.setAttribute('aria-label', `Switch to ${label} view`);
                 this.grid.appendChild(button);
+                return button;
             });
         }
 
         changeView(newView) {
+            if (newView === this.data.currentView) return;
             this.data.currentView = newView;
             DataManager.save(this.data);
             this.update();
@@ -399,20 +403,23 @@
         }
 
         update() {
+            if (this.data.currentView === 'resources') {
+                this.buildResourceTable();
+            } else {
+                this.buildArmyTable();
+            }
+            this.updateButtonStates();
+        }
+
+        buildResourceTable() {
+            const cities = CityManager.getAllCities();
             let table = this.grid.querySelector('table');
             if (!table) {
                 table = document.createElement('table');
                 this.grid.appendChild(table);
             }
             table.innerHTML = '';
-            this.data.currentView === 'resources'
-                ? this.buildResourceTable(table)
-                : this.buildArmyTable(table);
-            this.updateButtonStates();
-        }
 
-        buildResourceTable(table) {
-            const cities = CityManager.getAllCities();
             const headerRow = table.insertRow();
             headerRow.className = 'table-header';
             headerRow.insertCell().textContent = 'City';
@@ -455,9 +462,16 @@
             });
         }
 
-        buildArmyTable(table) {
+        buildArmyTable() {
             const cities = CityManager.getAllCities();
             const units = Object.values(Constants.UNIT_MAPPING);
+            let table = this.grid.querySelector('table');
+            if (!table) {
+                table = document.createElement('table');
+                this.grid.appendChild(table);
+            }
+            table.innerHTML = '';
+
             const headerRow = table.insertRow();
             headerRow.className = 'table-header';
             headerRow.insertCell().textContent = 'City';
@@ -501,7 +515,8 @@
         }
 
         updateButtonStates() {
-            this.grid.querySelectorAll('button').forEach(button => {
+            if (!this.buttons) return;
+            this.buttons.forEach(button => {
                 button.className = button.textContent.toLowerCase() === this.data.currentView
                     ? 'selected'
                     : 'deselected';
@@ -519,14 +534,14 @@
         }
 
         start() {
-            setInterval(() => this.checkUpdates(), 2000);
+            setInterval(() => this.checkUpdates(), 250);
         }
 
         checkUpdates() {
             const currentCity = CityManager.getCurrentCityName();
             const currentResources = CityManager.getCurrentResources();
             const currentArmy = CityManager.getCurrentArmy();
-            const militaryScreen = document.querySelector('table.militaryList');
+            const militaryScreen = !!document.querySelector('table.militaryList');
 
             let needsUpdate = false;
 
@@ -550,7 +565,10 @@
             const keys1 = Object.keys(obj1);
             const keys2 = Object.keys(obj2);
             if (keys1.length !== keys2.length) return false;
-            return keys1.every(key => obj1[key] === obj2[key]);
+            for (let i = 0; i < keys1.length; i++) {
+                if (obj1[keys1[i]] !== obj2[keys2[i]]) return false;
+            }
+            return true;
         }
 
         handleResourceUpdate(city, resources) {
@@ -573,6 +591,8 @@
             this.data = data;
             this.isDragging = false;
             this.offset = { x: 0, y: 0 };
+            this.boundDrag = null;
+            this.boundStop = null;
             this.initialize();
         }
 
@@ -591,10 +611,10 @@
                 y: e.clientY - this.grid.offsetTop
             };
 
-            const boundDrag = this.drag.bind(this);
-            const boundStop = this.stopDrag.bind(this);
-            document.addEventListener('mousemove', boundDrag);
-            document.addEventListener('mouseup', boundStop);
+            this.boundDrag = this.drag.bind(this);
+            this.boundStop = this.stopDrag.bind(this);
+            document.addEventListener('mousemove', this.boundDrag);
+            document.addEventListener('mouseup', this.boundStop);
         }
 
         drag(e) {
@@ -610,8 +630,14 @@
                 top: this.grid.offsetTop
             };
             DataManager.save(this.data);
-            document.removeEventListener('mousemove', this.drag);
-            document.removeEventListener('mouseup', this.stopDrag);
+            if (this.boundDrag) {
+                document.removeEventListener('mousemove', this.boundDrag);
+                this.boundDrag = null;
+            }
+            if (this.boundStop) {
+                document.removeEventListener('mouseup', this.boundStop);
+                this.boundStop = null;
+            }
         }
     }
 
