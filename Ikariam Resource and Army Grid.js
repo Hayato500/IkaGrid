@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      1.2
+// @version      1.3
 // @description  Enhanced multi-city tracking with individual updates
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
@@ -121,9 +121,15 @@
             }
         }
 
+        static parseNumber(text) {
+            return parseInt(text.replace(/[^0-9]/g, ''), 10) || 0;
+        }
+
         static getCurrentResources() {
             return Constants.RESOURCE_TYPES.reduce((acc, resource) => {
-                acc[resource] = parseInt($(`#js_GlobalMenu_${resource.toLowerCase()}`).text().replace(/,/g, '')) || 0;
+                const id = resource.toLowerCase();
+                const totalElement = $(`#js_GlobalMenu_${id}_Total`);
+                acc[resource] = totalElement.length > 0 ? this.parseNumber(totalElement.text()) : this.parseNumber($(`#js_GlobalMenu_${id}`).text());
                 return acc;
             }, {});
         }
@@ -145,7 +151,7 @@
                             const classCode = unitDiv.className.split(' ')[1];
                             const unitName = Constants.UNIT_MAPPING[classCode];
                             if (unitName && countCells[index]) {
-                                army[unitName] = parseInt(countCells[index].textContent.replace(/,/g, '')) || 0;
+                                army[unitName] = this.parseNumber(countCells[index].textContent);
                             }
                         }
                     });
@@ -274,7 +280,7 @@
 
         addCopyright() {
             const copyright = document.createElement('div');
-            copyright.id = 'resourceGridCopyright'; // Unique ID to avoid conflicts
+            copyright.id = 'resourceGridCopyright';
             copyright.className = 'copyright';
             copyright.innerHTML = '<span>By Kronos</span>';
             this.grid.appendChild(copyright);
@@ -306,7 +312,7 @@
                     box-shadow: none !important;
                     width: 25px !important;
                     height: 25px !important;
-                    cursor: default !important; /* Disable dragging on the grid itself when minimized */
+                    cursor: default !important;
                 }
 
                 #resourceGrid.minimized > *:not(#toggleButton) {
@@ -393,12 +399,15 @@
         }
 
         update() {
-            const table = this.grid.querySelector('table') || document.createElement('table');
+            let table = this.grid.querySelector('table');
+            if (!table) {
+                table = document.createElement('table');
+                this.grid.appendChild(table);
+            }
             table.innerHTML = '';
             this.data.currentView === 'resources'
                 ? this.buildResourceTable(table)
                 : this.buildArmyTable(table);
-            if (!this.grid.contains(table)) this.grid.appendChild(table);
             this.updateButtonStates();
         }
 
@@ -572,7 +581,6 @@
         }
 
         startDrag(e) {
-            // Only allow dragging from the toggle button when minimized, otherwise anywhere on the grid
             const isMinimized = this.grid.classList.contains('minimized');
             if (isMinimized && e.target.id !== 'toggleButton') return;
             if (!isMinimized && (e.target.tagName === 'BUTTON' || e.target.tagName === 'IMG')) return;
@@ -583,8 +591,10 @@
                 y: e.clientY - this.grid.offsetTop
             };
 
-            document.addEventListener('mousemove', this.drag.bind(this));
-            document.addEventListener('mouseup', this.stopDrag.bind(this));
+            const boundDrag = this.drag.bind(this);
+            const boundStop = this.stopDrag.bind(this);
+            document.addEventListener('mousemove', boundDrag);
+            document.addEventListener('mouseup', boundStop);
         }
 
         drag(e) {
