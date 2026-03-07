@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      1.4
+// @version      1.5
 // @description  Enhanced multi-city tracking with individual updates
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
@@ -38,6 +38,7 @@
                 SULFUR: `${BASE_URL}/Resources/icon_sulfur.png`
             },
             UNITS: `${BASE_URL}/Units/`,
+            BUILDINGS: `${BASE_URL}/Buildings/`,
             BACKGROUNDS: {
                 MAIN: `${BASE_URL}/Border/`,
                 COPYRIGHT: `${BASE_URL}/Border/copyright.png`
@@ -71,27 +72,86 @@
             's218': 'Paddle Speedboat',
             's219': 'Balloon Carrier',
             's220': 'Tender'
-        }
+        },
+        // Buildings in official game order
+        BUILDINGS: [
+            { id: 'townHall', name: 'Town Hall', icon: 'townHall.jpg' },
+            { id: 'academy', name: 'Academy', icon: 'academy.jpg' },
+            { id: 'warehouse', name: 'Warehouse', icon: 'warehouse.jpg' },
+            { id: 'tavern', name: 'Tavern', icon: 'tavern.jpg' },
+            { id: 'palace', name: 'Palace', icon: 'palace.jpg' },
+            { id: 'palaceColony', name: "Governor's Residence", icon: 'palaceColony.jpg' },
+            { id: 'museum', name: 'Museum', icon: 'museum.jpg' },
+            { id: 'port', name: 'Port', icon: 'port.jpg' },
+            { id: 'shipyard', name: 'Shipyard', icon: 'shipyard.jpg' },
+            { id: 'barracks', name: 'Barracks', icon: 'barracks.jpg' },
+            { id: 'wall', name: 'Wall', icon: 'wall.jpg' },
+            { id: 'embassy', name: 'Embassy', icon: 'embassy.jpg' },
+            { id: 'branchOffice', name: 'Branch Office', icon: 'branchOffice.jpg' },
+            { id: 'workshop', name: 'Workshop', icon: 'workshop.jpg' },
+            { id: 'safehouse', name: 'Safehouse', icon: 'safehouse.jpg' },
+            { id: 'forester', name: 'Forester', icon: 'forester.jpg' },
+            { id: 'glassblowing', name: 'Glassblowing', icon: 'glassblowing.jpg' },
+            { id: 'alchemist', name: 'Alchemist', icon: 'alchemist.jpg' },
+            { id: 'winegrower', name: 'Winegrower', icon: 'winegrower.jpg' },
+            { id: 'stonemason', name: 'Stonemason', icon: 'stonemason.jpg' },
+            { id: 'carpentering', name: 'Carpentering', icon: 'carpentering.jpg' },
+            { id: 'optician', name: 'Optician', icon: 'optician.jpg' },
+            { id: 'fireworker', name: 'Fireworker', icon: 'fireworker.jpg' },
+            { id: 'vineyard', name: 'Vineyard', icon: 'vineyard.jpg' },
+            { id: 'architect', name: 'Architect', icon: 'architect.jpg' },
+            { id: 'temple', name: 'Temple', icon: 'temple.jpg' },
+            { id: 'dump', name: 'Dump', icon: 'dump.jpg' },
+            { id: 'pirateFortress', name: 'Pirate Fortress', icon: 'pirateFortress.jpg' },
+            { id: 'blackMarket', name: 'Black Market', icon: 'blackMarket.jpg' },
+            { id: 'marineChartArchive', name: 'Marine Chart Archive', icon: 'marineChartArchive.jpg' },
+            { id: 'dockyard', name: 'Dockyard', icon: 'dockyard.jpg' },
+            { id: 'shrineOfOlympus', name: 'Shrine of Olympus', icon: 'shrineOfOlympus.jpg' },
+            { id: 'chronosForge', name: 'Chronos Forge', icon: 'chronosForge.jpg' }
+        ]
     };
 
     class DataManager {
         static load() {
+            let savedData = { resources: {}, army: {}, buildings: {} };
+            let position = { top: 50, left: 50 };
+            let isMinimized = false;
+            let currentView = 'resources';
+
             try {
-                return {
-                    savedData: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.DATA)) || { resources: {}, army: {} },
-                    position: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.POSITION)) || { top: 50, left: 50 },
-                    isMinimized: JSON.parse(localStorage.getItem(Constants.STORAGE_KEYS.MINIMIZED)) ?? false,
-                    currentView: localStorage.getItem(Constants.STORAGE_KEYS.VIEW) || 'resources'
-                };
-            } catch (error) {
-                console.error('Failed to load data:', error);
-                return {
-                    savedData: { resources: {}, army: {} },
-                    position: { top: 50, left: 50 },
-                    isMinimized: false,
-                    currentView: 'resources'
-                };
-            }
+                const saved = localStorage.getItem(Constants.STORAGE_KEYS.DATA);
+                if (saved) savedData = JSON.parse(saved);
+                // Migrate old building data (plain numbers) to new object format
+                if (savedData.buildings) {
+                    for (const city in savedData.buildings) {
+                        const cityBuildings = savedData.buildings[city];
+                        for (const name in cityBuildings) {
+                            if (typeof cityBuildings[name] === 'number') {
+                                cityBuildings[name] = { level: cityBuildings[name], upgrading: false };
+                            }
+                        }
+                    }
+                } else {
+                    savedData.buildings = {};
+                }
+            } catch (e) { console.error('Failed to load data:', e); }
+
+            try {
+                const pos = localStorage.getItem(Constants.STORAGE_KEYS.POSITION);
+                if (pos) position = JSON.parse(pos);
+            } catch (e) { console.error('Failed to load position:', e); }
+
+            try {
+                const min = localStorage.getItem(Constants.STORAGE_KEYS.MINIMIZED);
+                if (min !== null) isMinimized = JSON.parse(min);
+            } catch (e) { console.error('Failed to load minimized:', e); }
+
+            try {
+                const view = localStorage.getItem(Constants.STORAGE_KEYS.VIEW);
+                if (view) currentView = view;
+            } catch (e) { console.error('Failed to load view:', e); }
+
+            return { savedData, position, isMinimized, currentView };
         }
 
         static save(data) {
@@ -108,7 +168,8 @@
 
     class CityManager {
         static getCurrentCityName() {
-            return $('.white#js_cityBread').text().trim() || 'Unknown City';
+            const el = document.querySelector('#js_cityBread.white');
+            return el ? el.textContent.trim() : 'Unknown City';
         }
 
         static getAllCities() {
@@ -126,39 +187,115 @@
         }
 
         static getCurrentResources() {
-            return Constants.RESOURCE_TYPES.reduce((acc, resource) => {
+            const resources = {};
+            for (const resource of Constants.RESOURCE_TYPES) {
                 const id = resource.toLowerCase();
-                const totalElement = $(`#js_GlobalMenu_${id}_Total`);
-                acc[resource] = totalElement.length > 0 ? this.parseNumber(totalElement.text()) : this.parseNumber($(`#js_GlobalMenu_${id}`).text());
-                return acc;
-            }, {});
+                const totalEl = document.querySelector(`#js_GlobalMenu_${id}_Total`);
+                if (totalEl) {
+                    resources[resource] = this.parseNumber(totalEl.textContent);
+                } else {
+                    const singleEl = document.querySelector(`#js_GlobalMenu_${id}`);
+                    resources[resource] = singleEl ? this.parseNumber(singleEl.textContent) : 0;
+                }
+            }
+            return resources;
         }
 
         static getCurrentArmy() {
-            const army = Object.values(Constants.UNIT_MAPPING).reduce((acc, unit) => {
-                acc[unit] = 0;
-                return acc;
-            }, {});
+            const army = {};
+            for (const unit of Object.values(Constants.UNIT_MAPPING)) {
+                army[unit] = 0;
+            }
 
-            document.querySelectorAll('table.militaryList').forEach(table => {
+            const tables = document.querySelectorAll('table.militaryList');
+            for (const table of tables) {
                 const headers = table.querySelectorAll('th');
                 const countRow = table.querySelector('tr.count');
-                if (headers && countRow) {
-                    const countCells = countRow.querySelectorAll('td');
-                    headers.forEach((header, index) => {
-                        const unitDiv = header.querySelector('div[class^="army"], div[class^="fleet"]');
-                        if (unitDiv) {
-                            const classCode = unitDiv.className.split(' ')[1];
-                            const unitName = Constants.UNIT_MAPPING[classCode];
-                            if (unitName && countCells[index]) {
-                                army[unitName] = this.parseNumber(countCells[index].textContent);
-                            }
-                        }
-                    });
-                }
-            });
+                if (!headers.length || !countRow) continue;
 
+                const countCells = countRow.querySelectorAll('td');
+                for (let i = 0; i < headers.length; i++) {
+                    const header = headers[i];
+                    const unitDiv = header.querySelector('div[class^="army"], div[class^="fleet"]');
+                    if (unitDiv) {
+                        const classCode = unitDiv.className.split(' ')[1];
+                        const unitName = Constants.UNIT_MAPPING[classCode];
+                        if (unitName && countCells[i]) {
+                            army[unitName] = this.parseNumber(countCells[i].textContent);
+                        }
+                    }
+                }
+            }
             return army;
+        }
+
+        // Get building levels with upgrade detection and sum for dumps
+        static getCurrentBuildings() {
+            // Initialize counters for each building name
+            const buildingCounts = {};
+            for (const b of Constants.BUILDINGS) {
+                buildingCounts[b.name] = { level: 0, upgrading: false };
+            }
+
+            // Only run on city view
+            if (document.body.id !== 'city') {
+                // If not on city view, return zeros (no change)
+                const result = {};
+                for (const b of Constants.BUILDINGS) {
+                    result[b.name] = { level: 0, upgrading: false };
+                }
+                return result;
+            }
+
+            const positionDivs = document.querySelectorAll('[id^="position"]:not(.invisible)');
+            for (const div of positionDivs) {
+                const classList = div.className.split(' ');
+                const isConstruction = classList.includes('constructionSite');
+                let buildingClass, level;
+
+                if (isConstruction) {
+                    // Upgrading building: find link to get type and target level
+                    const link = div.querySelector('a.hoverable');
+                    if (!link) continue;
+                    const href = link.getAttribute('href');
+                    const match = href.match(/[?&]view=([^&]+)/);
+                    if (!match) continue;
+                    const view = match[1];
+                    const buildingDef = Constants.BUILDINGS.find(b => b.id === view);
+                    if (!buildingDef) continue;
+                    buildingClass = buildingDef.name;
+
+                    // Extract target level from link title
+                    const title = link.getAttribute('title');
+                    const levelMatch = title.match(/\((\d+)\)/);
+                    level = levelMatch ? parseInt(levelMatch[1], 10) : 0;
+                } else {
+                    // Normal building
+                    const buildingIndex = classList.indexOf('building');
+                    if (buildingIndex === -1) continue;
+                    buildingClass = classList[buildingIndex + 1];
+                    const levelClass = classList.find(cls => cls.startsWith('level'));
+                    if (!levelClass) continue;
+                    level = parseInt(levelClass.replace('level', ''), 10) || 0;
+                }
+
+                const buildingDef = Constants.BUILDINGS.find(b => b.id === buildingClass);
+                if (buildingDef) {
+                    const name = buildingDef.name;
+                    // Sum levels (for dump this will accumulate, for others it will be the single value)
+                    buildingCounts[name].level += level;
+                    if (isConstruction) {
+                        buildingCounts[name].upgrading = true;
+                    }
+                }
+            }
+
+            // Convert to simple object with building names as keys
+            const result = {};
+            for (const [name, info] of Object.entries(buildingCounts)) {
+                result[name] = info;
+            }
+            return result;
         }
 
         static async changeCity(cityName, dataSet) {
@@ -256,7 +393,7 @@
         }
 
         addViewButtons() {
-            this.buttons = ['Resources', 'Army'].map((label, i) => {
+            this.buttons = ['Resources', 'Army', 'Buildings'].map((label, i) => {
                 const button = document.createElement('button');
                 button.textContent = label;
                 button.style.cssText = `
@@ -394,10 +531,15 @@
                     text-shadow: 1px 1px 2px black;
                 }
 
-                .unit-icon {
+                .unit-icon, .building-icon {
                     width: 30px !important;
                     height: 30px !important;
                     object-fit: contain;
+                }
+
+                .upgrading {
+                    color: #00aa00 !important;
+                    font-weight: bold;
                 }
             `);
         }
@@ -405,8 +547,10 @@
         update() {
             if (this.data.currentView === 'resources') {
                 this.buildResourceTable();
-            } else {
+            } else if (this.data.currentView === 'army') {
                 this.buildArmyTable();
+            } else if (this.data.currentView === 'buildings') {
+                this.buildBuildingsTable();
             }
             this.updateButtonStates();
         }
@@ -420,21 +564,19 @@
             }
             table.innerHTML = '';
 
+            const resourceTypes = Constants.RESOURCE_TYPES;
             const headerRow = table.insertRow();
             headerRow.className = 'table-header';
             headerRow.insertCell().textContent = 'City';
 
-            Constants.RESOURCE_TYPES.forEach(resource => {
+            for (const resource of resourceTypes) {
                 const cell = headerRow.insertCell();
                 cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.RESOURCES[resource.toUpperCase()]}" alt="${resource}" width="20" height="20">`;
-            });
+            }
 
-            const totals = Constants.RESOURCE_TYPES.reduce((acc, res) => {
-                acc[res] = 0;
-                return acc;
-            }, {});
+            const totals = { Wood:0, Wine:0, Marble:0, Crystal:0, Sulfur:0 };
 
-            cities.forEach(city => {
+            for (const city of cities) {
                 const row = table.insertRow();
                 row.className = 'data-row';
                 const cityCell = row.insertCell();
@@ -446,20 +588,20 @@
                 cityLink.onclick = () => CityManager.changeCity(city.replace(' ★', ''), dataSetForView);
                 cityCell.appendChild(cityLink);
 
-                Constants.RESOURCE_TYPES.forEach(resource => {
+                for (const resource of resourceTypes) {
                     const value = this.data.savedData.resources[city]?.[resource] || 0;
                     const cell = row.insertCell();
                     cell.textContent = value.toLocaleString();
                     totals[resource] += value;
-                });
-            });
+                }
+            }
 
             const totalRow = table.insertRow();
             totalRow.className = 'total-row';
             totalRow.insertCell().textContent = 'Total';
-            Constants.RESOURCE_TYPES.forEach(resource => {
+            for (const resource of resourceTypes) {
                 totalRow.insertCell().textContent = totals[resource].toLocaleString();
-            });
+            }
         }
 
         buildArmyTable() {
@@ -476,17 +618,15 @@
             headerRow.className = 'table-header';
             headerRow.insertCell().textContent = 'City';
 
-            units.forEach(unit => {
+            for (const unit of units) {
                 const cell = headerRow.insertCell();
                 cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.UNITS}${unit.replace(/ /g, '_')}.png" class="unit-icon" alt="${unit}">`;
-            });
+            }
 
-            const totals = units.reduce((acc, unit) => {
-                acc[unit] = 0;
-                return acc;
-            }, {});
+            const totals = {};
+            for (const unit of units) totals[unit] = 0;
 
-            cities.forEach(city => {
+            for (const city of cities) {
                 const row = table.insertRow();
                 row.className = 'data-row';
                 const cityCell = row.insertCell();
@@ -498,29 +638,90 @@
                 cityLink.onclick = () => CityManager.changeCity(city.replace(' ★', ''), dataSetForView);
                 cityCell.appendChild(cityLink);
 
-                units.forEach(unit => {
+                for (const unit of units) {
                     const value = this.data.savedData.army[city]?.[unit] || 0;
                     const cell = row.insertCell();
                     cell.textContent = value.toLocaleString();
                     totals[unit] += value;
-                });
-            });
+                }
+            }
 
             const totalRow = table.insertRow();
             totalRow.className = 'total-row';
             totalRow.insertCell().textContent = 'Total';
-            units.forEach(unit => {
+            for (const unit of units) {
                 totalRow.insertCell().textContent = totals[unit].toLocaleString();
-            });
+            }
+        }
+
+        // Buildings table with dashes for non‑existent buildings
+        buildBuildingsTable() {
+            const cities = CityManager.getAllCities();
+            const buildings = Constants.BUILDINGS;
+            let table = this.grid.querySelector('table');
+            if (!table) {
+                table = document.createElement('table');
+                this.grid.appendChild(table);
+            }
+            table.innerHTML = '';
+
+            const headerRow = table.insertRow();
+            headerRow.className = 'table-header';
+            headerRow.insertCell().textContent = 'City';
+
+            for (const b of buildings) {
+                const cell = headerRow.insertCell();
+                cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.BUILDINGS}${b.icon}" class="building-icon" alt="${b.name}" title="${b.name}">`;
+            }
+
+            const totals = {};
+            for (const b of buildings) totals[b.name] = 0;
+
+            for (const city of cities) {
+                const row = table.insertRow();
+                row.className = 'data-row';
+                const cityCell = row.insertCell();
+                const isCurrent = city === CityManager.getCurrentCityName();
+
+                const cityLink = document.createElement('span');
+                cityLink.textContent = isCurrent ? `${city} ★` : city;
+                cityLink.style.cssText = 'cursor: pointer; text-decoration: underline;';
+                cityLink.onclick = () => CityManager.changeCity(city.replace(' ★', ''), dataSetForView);
+                cityCell.appendChild(cityLink);
+
+                for (const b of buildings) {
+                    const info = this.data.savedData.buildings[city]?.[b.name] || { level: 0, upgrading: false };
+                    const level = info.level || 0;
+                    const upgrading = info.upgrading || false;
+
+                    const cell = row.insertCell();
+                    if (level === 0) {
+                        cell.textContent = '-';
+                    } else {
+                        cell.textContent = level;
+                    }
+                    if (upgrading) {
+                        cell.classList.add('upgrading');
+                    }
+                    totals[b.name] += level; // level is 0 for non‑existent, so totals unaffected
+                }
+            }
+
+            const totalRow = table.insertRow();
+            totalRow.className = 'total-row';
+            totalRow.insertCell().textContent = 'Total';
+            for (const b of buildings) {
+                totalRow.insertCell().textContent = totals[b.name];
+            }
         }
 
         updateButtonStates() {
             if (!this.buttons) return;
-            this.buttons.forEach(button => {
+            for (const button of this.buttons) {
                 button.className = button.textContent.toLowerCase() === this.data.currentView
                     ? 'selected'
                     : 'deselected';
-            });
+            }
         }
     }
 
@@ -530,18 +731,21 @@
             this.lastCity = CityManager.getCurrentCityName();
             this.lastResources = CityManager.getCurrentResources();
             this.lastArmy = CityManager.getCurrentArmy();
+            this.lastBuildings = CityManager.getCurrentBuildings();
             this.debounceTimeout = null;
         }
 
         start() {
-            setInterval(() => this.checkUpdates(), 250);
+            setInterval(() => this.checkUpdates(), 1000);
         }
 
         checkUpdates() {
             const currentCity = CityManager.getCurrentCityName();
             const currentResources = CityManager.getCurrentResources();
             const currentArmy = CityManager.getCurrentArmy();
+            const currentBuildings = CityManager.getCurrentBuildings();
             const militaryScreen = !!document.querySelector('table.militaryList');
+            const cityView = document.body.id === 'city';
 
             let needsUpdate = false;
 
@@ -555,33 +759,51 @@
                 needsUpdate = true;
             }
 
+            if (cityView && !this.areObjectsEqual(currentBuildings, this.lastBuildings, true)) {
+                this.handleBuildingsUpdate(currentCity, currentBuildings);
+                needsUpdate = true;
+            }
+
             if (needsUpdate) {
                 clearTimeout(this.debounceTimeout);
                 this.debounceTimeout = setTimeout(() => this.gridUI.update(), 100);
             }
         }
 
-        areObjectsEqual(obj1, obj2) {
+        areObjectsEqual(obj1, obj2, deepCompare = false) {
             const keys1 = Object.keys(obj1);
             const keys2 = Object.keys(obj2);
             if (keys1.length !== keys2.length) return false;
-            for (let i = 0; i < keys1.length; i++) {
-                if (obj1[keys1[i]] !== obj2[keys2[i]]) return false;
+            for (const key of keys1) {
+                if (deepCompare) {
+                    const a = obj1[key];
+                    const b = obj2[key];
+                    if (!a || !b) return false;
+                    if (a.level !== b.level || a.upgrading !== b.upgrading) return false;
+                } else {
+                    if (obj1[key] !== obj2[key]) return false;
+                }
             }
             return true;
         }
 
         handleResourceUpdate(city, resources) {
-            this.gridUI.data.savedData.resources[city] = { ...resources };
+            this.gridUI.data.savedData.resources[city] = resources;
             DataManager.save(this.gridUI.data);
             this.lastCity = city;
-            this.lastResources = { ...resources };
+            this.lastResources = resources;
         }
 
         handleArmyUpdate(city, army) {
-            this.gridUI.data.savedData.army[city] = { ...army };
+            this.gridUI.data.savedData.army[city] = army;
             DataManager.save(this.gridUI.data);
-            this.lastArmy = { ...army };
+            this.lastArmy = army;
+        }
+
+        handleBuildingsUpdate(city, buildings) {
+            this.gridUI.data.savedData.buildings[city] = buildings;
+            DataManager.save(this.gridUI.data);
+            this.lastBuildings = buildings;
         }
     }
 
