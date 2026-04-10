@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      1.5
-// @description  Enhanced multi-city tracking with individual updates
+// @version      2.3 (buildings: correct upgrade target + RTL support)
+// @description  Enhanced multi-city tracking with buildings overview – shows total current → total target for upgrades (fixed)
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
 // @grant        GM_addStyle
@@ -73,7 +73,6 @@
             's219': 'Balloon Carrier',
             's220': 'Tender'
         },
-        // Buildings in official game order
         BUILDINGS: [
             { id: 'townHall', name: 'Town Hall', icon: 'townHall.jpg' },
             { id: 'academy', name: 'Academy', icon: 'academy.jpg' },
@@ -121,13 +120,37 @@
             try {
                 const saved = localStorage.getItem(Constants.STORAGE_KEYS.DATA);
                 if (saved) savedData = JSON.parse(saved);
-                // Migrate old building data (plain numbers) to new object format
                 if (savedData.buildings) {
                     for (const city in savedData.buildings) {
                         const cityBuildings = savedData.buildings[city];
                         for (const name in cityBuildings) {
-                            if (typeof cityBuildings[name] === 'number') {
-                                cityBuildings[name] = { level: cityBuildings[name], upgrading: false };
+                            const entry = cityBuildings[name];
+                            if (typeof entry === 'number') {
+                                cityBuildings[name] = {
+                                    currentLevel: entry,
+                                    targetLevel: null,
+                                    upgrading: false
+                                };
+                            } else if (entry && typeof entry === 'object' && entry.level !== undefined && entry.upgrading !== undefined && entry.currentLevel === undefined) {
+                                if (entry.upgrading) {
+                                    cityBuildings[name] = {
+                                        currentLevel: Math.max(0, entry.level - 1),
+                                        targetLevel: entry.level,
+                                        upgrading: true
+                                    };
+                                } else {
+                                    cityBuildings[name] = {
+                                        currentLevel: entry.level,
+                                        targetLevel: null,
+                                        upgrading: false
+                                    };
+                                }
+                            } else if (!entry || entry.currentLevel === undefined) {
+                                cityBuildings[name] = {
+                                    currentLevel: 0,
+                                    targetLevel: null,
+                                    upgrading: false
+                                };
                             }
                         }
                     }
@@ -229,73 +252,62 @@
             return army;
         }
 
-        // Get building levels with upgrade detection and sum for dumps
-        static getCurrentBuildings() {
-            // Initialize counters for each building name
-            const buildingCounts = {};
+        /**
+         * Returns raw data from DOM:
+         *   completedSum: sum of levels of all finished buildings of this type
+         *   upgrading: true if a construction site exists for this type
+         *   targetLevel: the level shown in the construction site's tooltip (may be current or target)
+         */
+        static getCurrentBuildingsRaw() {
+            const raw = {};
             for (const b of Constants.BUILDINGS) {
-                buildingCounts[b.name] = { level: 0, upgrading: false };
+                raw[b.name] = { completedSum: 0, upgrading: false, targetLevel: null };
             }
 
-            // Only run on city view
-            if (document.body.id !== 'city') {
-                // If not on city view, return zeros (no change)
-                const result = {};
-                for (const b of Constants.BUILDINGS) {
-                    result[b.name] = { level: 0, upgrading: false };
-                }
-                return result;
-            }
+            if (document.body.id !== 'city') return raw;
 
             const positionDivs = document.querySelectorAll('[id^="position"]:not(.invisible)');
             for (const div of positionDivs) {
                 const classList = div.className.split(' ');
                 const isConstruction = classList.includes('constructionSite');
-                let buildingClass, level;
+                let buildingDef = null;
+                let level = 0;
 
                 if (isConstruction) {
-                    // Upgrading building: find link to get type and target level
                     const link = div.querySelector('a.hoverable');
                     if (!link) continue;
                     const href = link.getAttribute('href');
                     const match = href.match(/[?&]view=([^&]+)/);
                     if (!match) continue;
                     const view = match[1];
-                    const buildingDef = Constants.BUILDINGS.find(b => b.id === view);
+                    buildingDef = Constants.BUILDINGS.find(b => b.id === view);
                     if (!buildingDef) continue;
-                    buildingClass = buildingDef.name;
-
-                    // Extract target level from link title
                     const title = link.getAttribute('title');
                     const levelMatch = title.match(/\((\d+)\)/);
                     level = levelMatch ? parseInt(levelMatch[1], 10) : 0;
                 } else {
-                    // Normal building
                     const buildingIndex = classList.indexOf('building');
                     if (buildingIndex === -1) continue;
-                    buildingClass = classList[buildingIndex + 1];
+                    const buildingClass = classList[buildingIndex + 1];
+                    buildingDef = Constants.BUILDINGS.find(b => b.id === buildingClass);
+                    if (!buildingDef) continue;
                     const levelClass = classList.find(cls => cls.startsWith('level'));
                     if (!levelClass) continue;
                     level = parseInt(levelClass.replace('level', ''), 10) || 0;
                 }
 
-                const buildingDef = Constants.BUILDINGS.find(b => b.id === buildingClass);
                 if (buildingDef) {
                     const name = buildingDef.name;
-                    // Sum levels (for dump this will accumulate, for others it will be the single value)
-                    buildingCounts[name].level += level;
                     if (isConstruction) {
-                        buildingCounts[name].upgrading = true;
+                        raw[name].upgrading = true;
+                        // Store the level as read from the tooltip
+                        raw[name].targetLevel = level;
+                    } else {
+                        raw[name].completedSum += level;
                     }
                 }
             }
-
-            // Convert to simple object with building names as keys
-            const result = {};
-            for (const [name, info] of Object.entries(buildingCounts)) {
-                result[name] = info;
-            }
-            return result;
+            return raw;
         }
 
         static async changeCity(cityName, dataSet) {
@@ -446,7 +458,6 @@
                     box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
                     cursor: move;
                 }
-
                 #resourceGrid.minimized {
                     background: transparent !important;
                     border: none !important;
@@ -455,17 +466,14 @@
                     height: 25px !important;
                     cursor: default !important;
                 }
-
                 #resourceGrid.minimized > *:not(#toggleButton) {
                     visibility: hidden !important;
                     opacity: 0 !important;
                 }
-
                 #resourceGrid.minimized #toggleButton {
                     visibility: visible !important;
                     opacity: 1 !important;
                 }
-
                 #resourceGrid table {
                     border-collapse: separate;
                     border-spacing: 0;
@@ -473,7 +481,6 @@
                     background-color: #fcdbaa;
                     width: 100%;
                 }
-
                 #resourceGrid th, #resourceGrid td {
                     border: 1px solid #d1b263 !important;
                     padding: 4px;
@@ -481,18 +488,15 @@
                     background-color: #f8f8f8;
                     font-weight: bold !important;
                 }
-
                 #resourceGrid th {
                     background-color: #e0a050;
                     padding: 8px;
                     border-bottom: 2px solid #a08040 !important;
                 }
-
                 #resourceGrid tr:hover td {
                     background-color: #f8e8c0 !important;
                     cursor: pointer;
                 }
-
                 button.selected {
                     background: url(${Constants.IMAGE_PATHS.BUTTONS.SELECTED}) no-repeat !important;
                     background-size: 100% 100% !important;
@@ -501,7 +505,6 @@
                     font-weight: bold !important;
                     font-family: Arial, sans-serif !important;
                 }
-
                 button.deselected {
                     background: url(${Constants.IMAGE_PATHS.BUTTONS.DESELECTED}) no-repeat !important;
                     background-size: 100% 100% !important;
@@ -510,7 +513,6 @@
                     font-weight: bold !important;
                     font-family: Arial, sans-serif !important;
                 }
-
                 #resourceGridCopyright.copyright {
                     background: url(${Constants.IMAGE_PATHS.BACKGROUNDS.COPYRIGHT}) no-repeat center;
                     width: 200px;
@@ -520,7 +522,6 @@
                     left: 50%;
                     transform: translateX(-50%);
                 }
-
                 #resourceGridCopyright.copyright span {
                     font-size: 12px !important;
                     display: block !important;
@@ -530,16 +531,18 @@
                     padding-top: 12px;
                     text-shadow: 1px 1px 2px black;
                 }
-
                 .unit-icon, .building-icon {
                     width: 30px !important;
                     height: 30px !important;
                     object-fit: contain;
                 }
-
                 .upgrading {
                     color: #00aa00 !important;
                     font-weight: bold;
+                }
+                .upgrading-arrow {
+                    font-weight: bold;
+                    margin: 0 2px;
                 }
             `);
         }
@@ -654,7 +657,6 @@
             }
         }
 
-        // Buildings table with dashes for non‑existent buildings
         buildBuildingsTable() {
             const cities = CityManager.getAllCities();
             const buildings = Constants.BUILDINGS;
@@ -677,6 +679,8 @@
             const totals = {};
             for (const b of buildings) totals[b.name] = 0;
 
+            const isRTL = document.body.classList.contains('direction_rtl');
+
             for (const city of cities) {
                 const row = table.insertRow();
                 row.className = 'data-row';
@@ -690,20 +694,28 @@
                 cityCell.appendChild(cityLink);
 
                 for (const b of buildings) {
-                    const info = this.data.savedData.buildings[city]?.[b.name] || { level: 0, upgrading: false };
-                    const level = info.level || 0;
+                    const info = this.data.savedData.buildings[city]?.[b.name] || { currentLevel: 0, targetLevel: null, upgrading: false };
+                    const currentLevel = info.currentLevel || 0;
+                    const targetLevel = info.targetLevel;
                     const upgrading = info.upgrading || false;
 
                     const cell = row.insertCell();
-                    if (level === 0) {
+                    if (currentLevel === 0 && !upgrading) {
                         cell.textContent = '-';
-                    } else {
-                        cell.textContent = level;
-                    }
-                    if (upgrading) {
+                    } else if (upgrading && targetLevel !== null && targetLevel > 0) {
+                        // Force LTR for the arrow to display correctly in RTL layouts
+                        const span = document.createElement('span');
+                        if (isRTL) span.setAttribute('dir', 'ltr');
+                        span.innerHTML = `${currentLevel} → ${targetLevel}`;
+                        cell.appendChild(span);
                         cell.classList.add('upgrading');
+                    } else if (upgrading) {
+                        cell.textContent = currentLevel;
+                        cell.classList.add('upgrading');
+                    } else {
+                        cell.textContent = currentLevel;
                     }
-                    totals[b.name] += level; // level is 0 for non‑existent, so totals unaffected
+                    totals[b.name] += currentLevel;
                 }
             }
 
@@ -731,8 +743,68 @@
             this.lastCity = CityManager.getCurrentCityName();
             this.lastResources = CityManager.getCurrentResources();
             this.lastArmy = CityManager.getCurrentArmy();
-            this.lastBuildings = CityManager.getCurrentBuildings();
+            this.lastBuildings = {};
             this.debounceTimeout = null;
+        }
+
+        /**
+         * Convert raw DOM data into stored format with correct totals.
+         * For a building type with an upgrade in progress:
+         *   - If completedSum > 0, it's an upgrade → targetLevel = raw.targetLevel + 1
+         *   - Otherwise, it's a new building → targetLevel = raw.targetLevel
+         * Then:
+         *   currentTotal = completedSum + (targetLevel - 1)
+         *   targetTotal = completedSum + targetLevel
+         */
+        enrichBuildings(rawBuildings, previousBuildings) {
+            const enriched = {};
+            for (const name of Object.keys(rawBuildings)) {
+                const raw = rawBuildings[name];
+                const prev = previousBuildings[name] || { currentLevel: 0, targetLevel: null, upgrading: false };
+                let currentLevel, targetLevel, upgrading;
+
+                if (raw.upgrading && raw.targetLevel !== null) {
+                    upgrading = true;
+                    // Determine true target level: if there are existing buildings, it's an upgrade (+1)
+                    let trueTarget = raw.targetLevel;
+                    if (raw.completedSum > 0) {
+                        // Existing building(s) → upgrade, so tooltip shows current level
+                        trueTarget = raw.targetLevel + 1;
+                    }
+                    // Current total = finished buildings + (target level - 1)
+                    const currentTotal = raw.completedSum + (trueTarget - 1);
+                    const targetTotal = raw.completedSum + trueTarget;
+                    // Keep previous values if the upgrade is unchanged (same target)
+                    if (prev.upgrading && prev.targetLevel === targetTotal) {
+                        currentLevel = prev.currentLevel;
+                        targetLevel = prev.targetLevel;
+                    } else {
+                        currentLevel = currentTotal;
+                        targetLevel = targetTotal;
+                    }
+                } else {
+                    upgrading = false;
+                    currentLevel = raw.completedSum;
+                    targetLevel = null;
+                }
+                enriched[name] = { currentLevel, targetLevel, upgrading };
+            }
+            return enriched;
+        }
+
+        areBuildingsEqual(b1, b2) {
+            const keys1 = Object.keys(b1);
+            const keys2 = Object.keys(b2);
+            if (keys1.length !== keys2.length) return false;
+            for (const key of keys1) {
+                const a = b1[key];
+                const b = b2[key];
+                if (!a || !b) return false;
+                if (a.currentLevel !== b.currentLevel ||
+                    a.targetLevel !== b.targetLevel ||
+                    a.upgrading !== b.upgrading) return false;
+            }
+            return true;
         }
 
         start() {
@@ -743,7 +815,8 @@
             const currentCity = CityManager.getCurrentCityName();
             const currentResources = CityManager.getCurrentResources();
             const currentArmy = CityManager.getCurrentArmy();
-            const currentBuildings = CityManager.getCurrentBuildings();
+            const rawBuildings = CityManager.getCurrentBuildingsRaw();
+            const currentBuildings = this.enrichBuildings(rawBuildings, this.lastBuildings);
             const militaryScreen = !!document.querySelector('table.militaryList');
             const cityView = document.body.id === 'city';
 
@@ -759,7 +832,7 @@
                 needsUpdate = true;
             }
 
-            if (cityView && !this.areObjectsEqual(currentBuildings, this.lastBuildings, true)) {
+            if (cityView && !this.areBuildingsEqual(currentBuildings, this.lastBuildings)) {
                 this.handleBuildingsUpdate(currentCity, currentBuildings);
                 needsUpdate = true;
             }
@@ -770,19 +843,12 @@
             }
         }
 
-        areObjectsEqual(obj1, obj2, deepCompare = false) {
+        areObjectsEqual(obj1, obj2) {
             const keys1 = Object.keys(obj1);
             const keys2 = Object.keys(obj2);
             if (keys1.length !== keys2.length) return false;
             for (const key of keys1) {
-                if (deepCompare) {
-                    const a = obj1[key];
-                    const b = obj2[key];
-                    if (!a || !b) return false;
-                    if (a.level !== b.level || a.upgrading !== b.upgrading) return false;
-                } else {
-                    if (obj1[key] !== obj2[key]) return false;
-                }
+                if (obj1[key] !== obj2[key]) return false;
             }
             return true;
         }
