@@ -1,75 +1,36 @@
 # Ikariam Resource and Army Grid
 
-A comprehensive Violentmonkey script for Ikariam players to track resources, military forces, and building levels across all cities in real-time.
+> ⚡ This project was generated entirely by AI.
+
+[![UserScript](https://img.shields.io/badge/Userscript-Violentmonkey-purple)](https://violentmonkey.github.io/)
+[![Ikariam](https://img.shields.io/badge/Ikariam-Gameforge-orange)](https://ikariam.gameforge.com/)
+[![Version](https://img.shields.io/badge/version-2.4.1-blue)](https://github.com/Hayato500/IkaGrid)
+
+A Violentmonkey script for Ikariam that tracks resources, military, and building levels across all cities in one draggable grid.
 
 ## Features
 
-- 📊 **Multi-City Overview**: Simultaneous tracking of resources, military units, and building levels
-- ⚡ **Live Updates**: Automatic refresh every 1 second (optimized for performance)
-- 🖱️ **Interactive Interface**:
-  - Drag-and-drop positioning
-  - Minimize/maximize toggle
-  - Switch between Resources/Army/Buildings views
-- 🏛️ **Buildings Overview**:
-  - Complete grid of all building levels per city
-  - **Dump column** sums all warehouses in the city
-  - **Upgrading buildings** shown in green
-  - **Non-existent buildings** displayed as dash (`-`)
-- 📍 **City Quick Access**: Click city names to instantly switch cities
-- 💾 **Persistent Storage**: Saves position and data through browser sessions
-- 📱 **Responsive Design**: Adapts to different screen sizes
+- 📊 **Multi-city overview** – resources, army, buildings at a glance
+- ⚡ **Live updates** – data refreshes every second while you play
+- 🖱️ **Interactive** – drag to move, click city names to switch cities, minimise with 📌
+- 🏛️ **Buildings grid** – all building levels per city; upgrading shows `current → target` (green arrow)
+- 💾 **Persistent storage** – saves position and data across sessions
 
 ## Installation
 
-1. Install a userscript manager:
-   - [Violentmonkey](https://violentmonkey.github.io/) (Firefox/Chrome/Edge)
-
-2. **[Click to Install Script](https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Ikariam%20Resource%20and%20Army%20Grid.js)**
+1. Install [Violentmonkey](https://violentmonkey.github.io/)
+2. **[Click to install script](https://raw.githubusercontent.com/Hayato500/IkaGrid/main/Ikariam%20Resource%20and%20Army%20Grid.js)**
 
 ## Usage
 
-- **Toggle Views**: Switch between Resources, Army, and Buildings using the header buttons
-- **City Navigation**: Click any city name to jump to that city
-- **Minimize**: Click the 📌 icon in top-left to collapse
-- **Data Collection**:
-  - Resources auto-save when changing cities
-  - Military data saves when viewing army screens
-  - Building data updates automatically when on city view
-- **Buildings Tab**: Shows levels for all buildings in the game's official order. Upgrading buildings appear in green; missing buildings show `-`.
-
-## Technical Details
-
-- **Storage**: Uses `localStorage` for:
-  - Grid position
-  - Minimized state
-  - Active view preference
-  - Resource, military, and building data
-- **Dependencies**:
-  - jQuery 3.6.0 (for compatibility with other scripts)
-  - GM_addStyle
-- **Performance**: Optimized with 1‑second polling and debounced UI updates
-- **Compatibility**: Tested on modern Chrome/Firefox/Edge
+- Switch views with **Resources** / **Army** / **Buildings** buttons
+- Click any city name to instantly jump there
+- Data auto‑saves when you change cities or open military screens
+- Building upgrades show `current → target`; missing buildings show `-`
 
 ## Credits
 
-- **Author**: Kronos
-- **Graphics**: Custom UI elements with native Ikariam art style
-- **Hosting**: GitHub raw file hosting
+- **Author**: Kronos (AI‑generated)
+- All UI graphics styled after Ikariam
 
-## Troubleshooting
-
-1. **Script Not Loading**:
-   - Ensure userscript manager is enabled
-   - Verify script is active in Violentmonkey dashboard
-
-2. **Data Issues**:
-   - Clear old data: `localStorage.clear()` in console
-   - Refresh page after city changes
-
-3. **Updates**:
-   - Script auto-updates through Violentmonkey
-   - Manual update URL in script header
-
----
-
-**Note**: This is an unofficial fan project. Ikariam is property of Gameforge AG.
+**Disclaimer**: Unofficial fan project. Ikariam is property of Gameforge AG.
