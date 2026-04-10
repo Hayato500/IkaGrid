@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      2.4 (optimized: no jQuery, diff updates)
+// @version      2.4.1 (minimized size & toggle position fix)
 // @description  Enhanced multi-city tracking with buildings overview – shows total current → total target for upgrades (fixed)
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
@@ -109,10 +109,8 @@
         ]
     };
 
-    // Create a Map for fast building lookups
     const buildingMap = new Map(Constants.BUILDINGS.map(b => [b.name, b]));
 
-    // Helper: memoize city list
     let cachedCities = null;
     function getCachedCities() {
         if (!cachedCities) {
@@ -206,7 +204,6 @@
             }
         }
 
-        // Save only position (called after drag stops)
         static savePosition(position) {
             try {
                 localStorage.setItem(Constants.STORAGE_KEYS.POSITION, JSON.stringify(position));
@@ -364,8 +361,7 @@
             this.grid = this.createGridElement();
             this.table = null;
             this.buttons = null;
-            // For diff-based updates, store references to cells
-            this.rowMap = new Map(); // city -> row element (or array of cells)
+            this.rowMap = new Map();
             this.totalRow = null;
             this.headerCells = [];
             this.initializeGrid();
@@ -389,13 +385,12 @@
             this.addViewButtons();
             this.addCopyright();
             this.applyStyles();
-            this.createTableStructure(); // Build table skeleton once
+            this.createTableStructure();
             this.update();
             if (this.data.isMinimized) this.grid.classList.add('minimized');
         }
 
         createTableStructure() {
-            // Create empty table that will be filled per view
             const table = document.createElement('table');
             this.table = table;
             this.grid.appendChild(table);
@@ -410,7 +405,6 @@
             toggleButton.alt = 'Toggle minimize/maximize';
             toggleButton.onclick = () => this.toggleMinimized();
             this.grid.appendChild(toggleButton);
-            // Class-based positioning handled by CSS now
         }
 
         toggleMinimized() {
@@ -439,7 +433,6 @@
             if (newView === this.data.currentView) return;
             this.data.currentView = newView;
             DataManager.save(this.data);
-            // Clear row cache when switching views because structure changes
             this.rowMap.clear();
             this.totalRow = null;
             this.headerCells = [];
@@ -479,17 +472,12 @@
                     box-shadow: none !important;
                     width: 25px !important;
                     height: 25px !important;
+                    padding: 0 !important;
+                    min-width: 0 !important;
                     cursor: default !important;
                 }
                 #resourceGrid.minimized > *:not(#toggleButton) {
                     display: none !important;
-                }
-                #resourceGrid.minimized #toggleButton {
-                    display: block !important;
-                    position: static !important;
-                    width: 25px !important;
-                    height: 25px !important;
-                    cursor: move !important;
                 }
                 #resourceGrid table {
                     border-collapse: separate;
@@ -550,8 +538,9 @@
                     z-index: 10000;
                 }
                 #resourceGrid.minimized #toggleButton {
-                    top: 2px !important;
-                    left: 2px !important;
+                    top: 25px !important;
+                    left: 50px !important;
+                    cursor: move !important;
                 }
                 #resourceGridCopyright.copyright {
                     background: url(${Constants.IMAGE_PATHS.BACKGROUNDS.COPYRIGHT}) no-repeat center;
@@ -584,7 +573,6 @@
                     font-weight: bold;
                     margin: 0 2px;
                 }
-                /* RTL arrow fix using CSS */
                 .building-arrow {
                     unicode-bidi: embed;
                     direction: ltr;
@@ -613,7 +601,6 @@
             }
         }
 
-        // ---- Diff-based update methods ----
         updateResourceTable() {
             const cities = CityManager.getAllCities();
             const resourceTypes = Constants.RESOURCE_TYPES;
@@ -624,13 +611,11 @@
                 return;
             }
 
-            // Update values only
             const totals = { Wood:0, Wine:0, Marble:0, Crystal:0, Sulfur:0 };
             for (const city of cities) {
                 const row = this.rowMap.get(city);
-                if (!row) continue; // Should not happen
+                if (!row) continue;
                 const cells = row.cells;
-                // cells[0] is city name cell (skip)
                 for (let i = 0; i < resourceTypes.length; i++) {
                     const resource = resourceTypes[i];
                     const value = this.data.savedData.resources[city]?.[resource] || 0;
@@ -640,7 +625,6 @@
                     }
                     totals[resource] += value;
                 }
-                // Update star indicator if current city changed
                 const cityCell = cells[0];
                 const isCurrent = city === CityManager.getCurrentCityName();
                 const link = cityCell.querySelector('span');
@@ -650,7 +634,6 @@
                 }
             }
 
-            // Update total row
             if (this.totalRow) {
                 const totalCells = this.totalRow.cells;
                 for (let i = 0; i < resourceTypes.length; i++) {
@@ -735,7 +718,6 @@
                     }
                     totals[unit] += value;
                 }
-                // Update star
                 const cityCell = cells[0];
                 const isCurrent = city === CityManager.getCurrentCityName();
                 const link = cityCell.querySelector('span');
@@ -841,7 +823,6 @@
                         newText = currentLevel.toString();
                     }
 
-                    // Compare current content
                     if (newHtml) {
                         if (cell.innerHTML !== newHtml) {
                             cell.innerHTML = newHtml;
@@ -855,7 +836,6 @@
                     }
                     totals[b.name] += currentLevel;
                 }
-                // Update star
                 const cityCell = cells[0];
                 const isCurrent = city === CityManager.getCurrentCityName();
                 const link = cityCell.querySelector('span');
@@ -1118,7 +1098,6 @@
         }
     }
 
-    // Entry point – replace jQuery's $(document).ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
