@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name         Ikariam Resource and Army Grid
 // @namespace    Kronos
-// @version      2.3 (buildings: correct upgrade target + RTL support)
+// @version      2.4 (optimized: no jQuery, diff updates)
 // @description  Enhanced multi-city tracking with buildings overview – shows total current → total target for upgrades (fixed)
 // @author       Kronos
 // @match        *://*.ikariam.gameforge.com/*
 // @grant        GM_addStyle
-// @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @downloadURL  https://raw.githubusercontent.com/Hayato500/IkaGrid/refs/heads/main/Ikariam%20Resource%20and%20Army%20Grid.js
 // @updateURL    https://raw.githubusercontent.com/Hayato500/IkaGrid/refs/heads/main/Ikariam%20Resource%20and%20Army%20Grid.js
 // ==/UserScript==
@@ -110,6 +109,25 @@
         ]
     };
 
+    // Create a Map for fast building lookups
+    const buildingMap = new Map(Constants.BUILDINGS.map(b => [b.name, b]));
+
+    // Helper: memoize city list
+    let cachedCities = null;
+    function getCachedCities() {
+        if (!cachedCities) {
+            try {
+                cachedCities = Object.values(dataSetForView.relatedCityData)
+                    .filter(city => city?.name)
+                    .map(city => city.name);
+            } catch {
+                cachedCities = [CityManager.getCurrentCityName()];
+            }
+        }
+        return cachedCities;
+    }
+    function clearCityCache() { cachedCities = null; }
+
     class DataManager {
         static load() {
             let savedData = { resources: {}, army: {}, buildings: {} };
@@ -187,6 +205,13 @@
                 console.error('Failed to save data:', error);
             }
         }
+
+        // Save only position (called after drag stops)
+        static savePosition(position) {
+            try {
+                localStorage.setItem(Constants.STORAGE_KEYS.POSITION, JSON.stringify(position));
+            } catch (e) { console.error('Failed to save position:', e); }
+        }
     }
 
     class CityManager {
@@ -196,13 +221,7 @@
         }
 
         static getAllCities() {
-            try {
-                return Object.values(dataSetForView.relatedCityData)
-                    .filter(city => city?.name)
-                    .map(city => city.name);
-            } catch {
-                return [this.getCurrentCityName()];
-            }
+            return getCachedCities();
         }
 
         static parseNumber(text) {
@@ -252,12 +271,6 @@
             return army;
         }
 
-        /**
-         * Returns raw data from DOM:
-         *   completedSum: sum of levels of all finished buildings of this type
-         *   upgrading: true if a construction site exists for this type
-         *   targetLevel: the level shown in the construction site's tooltip (may be current or target)
-         */
         static getCurrentBuildingsRaw() {
             const raw = {};
             for (const b of Constants.BUILDINGS) {
@@ -300,7 +313,6 @@
                     const name = buildingDef.name;
                     if (isConstruction) {
                         raw[name].upgrading = true;
-                        // Store the level as read from the tooltip
                         raw[name].targetLevel = level;
                     } else {
                         raw[name].completedSum += level;
@@ -352,6 +364,10 @@
             this.grid = this.createGridElement();
             this.table = null;
             this.buttons = null;
+            // For diff-based updates, store references to cells
+            this.rowMap = new Map(); // city -> row element (or array of cells)
+            this.totalRow = null;
+            this.headerCells = [];
             this.initializeGrid();
         }
 
@@ -373,8 +389,16 @@
             this.addViewButtons();
             this.addCopyright();
             this.applyStyles();
+            this.createTableStructure(); // Build table skeleton once
             this.update();
             if (this.data.isMinimized) this.grid.classList.add('minimized');
+        }
+
+        createTableStructure() {
+            // Create empty table that will be filled per view
+            const table = document.createElement('table');
+            this.table = table;
+            this.grid.appendChild(table);
         }
 
         addHeaderElements() {
@@ -383,12 +407,10 @@
             toggleButton.src = this.data.isMinimized
                 ? Constants.IMAGE_PATHS.BUTTONS.MAXIMIZE
                 : Constants.IMAGE_PATHS.BUTTONS.MINIMIZE;
-            toggleButton.style.cssText = this.data.isMinimized
-                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: move; z-index: 10000;'
-                : 'position: absolute; top: 25px; left: 50px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;';
             toggleButton.alt = 'Toggle minimize/maximize';
             toggleButton.onclick = () => this.toggleMinimized();
             this.grid.appendChild(toggleButton);
+            // Class-based positioning handled by CSS now
         }
 
         toggleMinimized() {
@@ -398,9 +420,6 @@
             toggleButton.src = this.data.isMinimized
                 ? Constants.IMAGE_PATHS.BUTTONS.MAXIMIZE
                 : Constants.IMAGE_PATHS.BUTTONS.MINIMIZE;
-            toggleButton.style.cssText = this.data.isMinimized
-                ? 'position: absolute; top: 2px; left: 2px; width: 25px; height: 25px; cursor: move; z-index: 10000;'
-                : 'position: absolute; top: 25px; left: 50px; width: 25px; height: 25px; cursor: pointer; z-index: 10000;';
             DataManager.save(this.data);
         }
 
@@ -408,14 +427,6 @@
             this.buttons = ['Resources', 'Army', 'Buildings'].map((label, i) => {
                 const button = document.createElement('button');
                 button.textContent = label;
-                button.style.cssText = `
-                    position: absolute;
-                    top: 25px;
-                    left: ${85 + (i * 135)}px;
-                    width: 130px;
-                    height: 26px;
-                    padding: 0;
-                `;
                 button.className = label.toLowerCase() === this.data.currentView ? 'selected' : 'deselected';
                 button.onclick = () => this.changeView(label.toLowerCase());
                 button.setAttribute('aria-label', `Switch to ${label} view`);
@@ -428,6 +439,10 @@
             if (newView === this.data.currentView) return;
             this.data.currentView = newView;
             DataManager.save(this.data);
+            // Clear row cache when switching views because structure changes
+            this.rowMap.clear();
+            this.totalRow = null;
+            this.headerCells = [];
             this.update();
         }
 
@@ -467,12 +482,14 @@
                     cursor: default !important;
                 }
                 #resourceGrid.minimized > *:not(#toggleButton) {
-                    visibility: hidden !important;
-                    opacity: 0 !important;
+                    display: none !important;
                 }
                 #resourceGrid.minimized #toggleButton {
-                    visibility: visible !important;
-                    opacity: 1 !important;
+                    display: block !important;
+                    position: static !important;
+                    width: 25px !important;
+                    height: 25px !important;
+                    cursor: move !important;
                 }
                 #resourceGrid table {
                     border-collapse: separate;
@@ -497,7 +514,14 @@
                     background-color: #f8e8c0 !important;
                     cursor: pointer;
                 }
-                button.selected {
+                #resourceGrid button {
+                    position: absolute;
+                    top: 25px;
+                    width: 130px;
+                    height: 26px;
+                    padding: 0;
+                }
+                #resourceGrid button.selected {
                     background: url(${Constants.IMAGE_PATHS.BUTTONS.SELECTED}) no-repeat !important;
                     background-size: 100% 100% !important;
                     border: none !important;
@@ -505,13 +529,29 @@
                     font-weight: bold !important;
                     font-family: Arial, sans-serif !important;
                 }
-                button.deselected {
+                #resourceGrid button.deselected {
                     background: url(${Constants.IMAGE_PATHS.BUTTONS.DESELECTED}) no-repeat !important;
                     background-size: 100% 100% !important;
                     border: none !important;
                     color: black !important;
                     font-weight: bold !important;
                     font-family: Arial, sans-serif !important;
+                }
+                #resourceGrid button:nth-of-type(1) { left: 85px; }
+                #resourceGrid button:nth-of-type(2) { left: 220px; }
+                #resourceGrid button:nth-of-type(3) { left: 355px; }
+                #resourceGrid #toggleButton {
+                    position: absolute;
+                    top: 25px;
+                    left: 50px;
+                    width: 25px;
+                    height: 25px;
+                    cursor: pointer;
+                    z-index: 10000;
+                }
+                #resourceGrid.minimized #toggleButton {
+                    top: 2px !important;
+                    left: 2px !important;
                 }
                 #resourceGridCopyright.copyright {
                     background: url(${Constants.IMAGE_PATHS.BACKGROUNDS.COPYRIGHT}) no-repeat center;
@@ -544,38 +584,98 @@
                     font-weight: bold;
                     margin: 0 2px;
                 }
+                /* RTL arrow fix using CSS */
+                .building-arrow {
+                    unicode-bidi: embed;
+                    direction: ltr;
+                    display: inline-block;
+                }
             `);
         }
 
         update() {
             if (this.data.currentView === 'resources') {
-                this.buildResourceTable();
+                this.updateResourceTable();
             } else if (this.data.currentView === 'army') {
-                this.buildArmyTable();
+                this.updateArmyTable();
             } else if (this.data.currentView === 'buildings') {
-                this.buildBuildingsTable();
+                this.updateBuildingsTable();
             }
             this.updateButtonStates();
         }
 
-        buildResourceTable() {
-            const cities = CityManager.getAllCities();
-            let table = this.grid.querySelector('table');
-            if (!table) {
-                table = document.createElement('table');
-                this.grid.appendChild(table);
+        updateButtonStates() {
+            if (!this.buttons) return;
+            for (const button of this.buttons) {
+                button.className = button.textContent.toLowerCase() === this.data.currentView
+                    ? 'selected'
+                    : 'deselected';
             }
-            table.innerHTML = '';
+        }
 
+        // ---- Diff-based update methods ----
+        updateResourceTable() {
+            const cities = CityManager.getAllCities();
             const resourceTypes = Constants.RESOURCE_TYPES;
+            const needFullRebuild = !this.rowMap.size || this.headerCells.length === 0;
+
+            if (needFullRebuild) {
+                this.buildResourceTableFull(cities, resourceTypes);
+                return;
+            }
+
+            // Update values only
+            const totals = { Wood:0, Wine:0, Marble:0, Crystal:0, Sulfur:0 };
+            for (const city of cities) {
+                const row = this.rowMap.get(city);
+                if (!row) continue; // Should not happen
+                const cells = row.cells;
+                // cells[0] is city name cell (skip)
+                for (let i = 0; i < resourceTypes.length; i++) {
+                    const resource = resourceTypes[i];
+                    const value = this.data.savedData.resources[city]?.[resource] || 0;
+                    const cell = cells[i + 1];
+                    if (cell.textContent !== value.toLocaleString()) {
+                        cell.textContent = value.toLocaleString();
+                    }
+                    totals[resource] += value;
+                }
+                // Update star indicator if current city changed
+                const cityCell = cells[0];
+                const isCurrent = city === CityManager.getCurrentCityName();
+                const link = cityCell.querySelector('span');
+                if (link) {
+                    const newText = isCurrent ? `${city} ★` : city;
+                    if (link.textContent !== newText) link.textContent = newText;
+                }
+            }
+
+            // Update total row
+            if (this.totalRow) {
+                const totalCells = this.totalRow.cells;
+                for (let i = 0; i < resourceTypes.length; i++) {
+                    const resource = resourceTypes[i];
+                    const value = totals[resource];
+                    const cell = totalCells[i + 1];
+                    if (cell.textContent !== value.toLocaleString()) {
+                        cell.textContent = value.toLocaleString();
+                    }
+                }
+            }
+        }
+
+        buildResourceTableFull(cities, resourceTypes) {
+            this.rowMap.clear();
+            const table = this.table;
+            table.innerHTML = '';
             const headerRow = table.insertRow();
             headerRow.className = 'table-header';
             headerRow.insertCell().textContent = 'City';
-
             for (const resource of resourceTypes) {
                 const cell = headerRow.insertCell();
                 cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.RESOURCES[resource.toUpperCase()]}" alt="${resource}" width="20" height="20">`;
             }
+            this.headerCells = Array.from(headerRow.cells);
 
             const totals = { Wood:0, Wine:0, Marble:0, Crystal:0, Sulfur:0 };
 
@@ -597,6 +697,7 @@
                     cell.textContent = value.toLocaleString();
                     totals[resource] += value;
                 }
+                this.rowMap.set(city, row);
             }
 
             const totalRow = table.insertRow();
@@ -605,26 +706,70 @@
             for (const resource of resourceTypes) {
                 totalRow.insertCell().textContent = totals[resource].toLocaleString();
             }
+            this.totalRow = totalRow;
         }
 
-        buildArmyTable() {
+        updateArmyTable() {
             const cities = CityManager.getAllCities();
             const units = Object.values(Constants.UNIT_MAPPING);
-            let table = this.grid.querySelector('table');
-            if (!table) {
-                table = document.createElement('table');
-                this.grid.appendChild(table);
-            }
-            table.innerHTML = '';
+            const needFullRebuild = !this.rowMap.size || this.headerCells.length === 0;
 
+            if (needFullRebuild) {
+                this.buildArmyTableFull(cities, units);
+                return;
+            }
+
+            const totals = {};
+            for (const unit of units) totals[unit] = 0;
+
+            for (const city of cities) {
+                const row = this.rowMap.get(city);
+                if (!row) continue;
+                const cells = row.cells;
+                for (let i = 0; i < units.length; i++) {
+                    const unit = units[i];
+                    const value = this.data.savedData.army[city]?.[unit] || 0;
+                    const cell = cells[i + 1];
+                    if (cell.textContent !== value.toLocaleString()) {
+                        cell.textContent = value.toLocaleString();
+                    }
+                    totals[unit] += value;
+                }
+                // Update star
+                const cityCell = cells[0];
+                const isCurrent = city === CityManager.getCurrentCityName();
+                const link = cityCell.querySelector('span');
+                if (link) {
+                    const newText = isCurrent ? `${city} ★` : city;
+                    if (link.textContent !== newText) link.textContent = newText;
+                }
+            }
+
+            if (this.totalRow) {
+                const totalCells = this.totalRow.cells;
+                for (let i = 0; i < units.length; i++) {
+                    const unit = units[i];
+                    const value = totals[unit];
+                    const cell = totalCells[i + 1];
+                    if (cell.textContent !== value.toLocaleString()) {
+                        cell.textContent = value.toLocaleString();
+                    }
+                }
+            }
+        }
+
+        buildArmyTableFull(cities, units) {
+            this.rowMap.clear();
+            const table = this.table;
+            table.innerHTML = '';
             const headerRow = table.insertRow();
             headerRow.className = 'table-header';
             headerRow.insertCell().textContent = 'City';
-
             for (const unit of units) {
                 const cell = headerRow.insertCell();
                 cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.UNITS}${unit.replace(/ /g, '_')}.png" class="unit-icon" alt="${unit}">`;
             }
+            this.headerCells = Array.from(headerRow.cells);
 
             const totals = {};
             for (const unit of units) totals[unit] = 0;
@@ -647,6 +792,7 @@
                     cell.textContent = value.toLocaleString();
                     totals[unit] += value;
                 }
+                this.rowMap.set(city, row);
             }
 
             const totalRow = table.insertRow();
@@ -655,31 +801,98 @@
             for (const unit of units) {
                 totalRow.insertCell().textContent = totals[unit].toLocaleString();
             }
+            this.totalRow = totalRow;
         }
 
-        buildBuildingsTable() {
+        updateBuildingsTable() {
             const cities = CityManager.getAllCities();
             const buildings = Constants.BUILDINGS;
-            let table = this.grid.querySelector('table');
-            if (!table) {
-                table = document.createElement('table');
-                this.grid.appendChild(table);
-            }
-            table.innerHTML = '';
+            const needFullRebuild = !this.rowMap.size || this.headerCells.length === 0;
 
-            const headerRow = table.insertRow();
-            headerRow.className = 'table-header';
-            headerRow.insertCell().textContent = 'City';
-
-            for (const b of buildings) {
-                const cell = headerRow.insertCell();
-                cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.BUILDINGS}${b.icon}" class="building-icon" alt="${b.name}" title="${b.name}">`;
+            if (needFullRebuild) {
+                this.buildBuildingsTableFull(cities, buildings);
+                return;
             }
 
             const totals = {};
             for (const b of buildings) totals[b.name] = 0;
 
-            const isRTL = document.body.classList.contains('direction_rtl');
+            for (const city of cities) {
+                const row = this.rowMap.get(city);
+                if (!row) continue;
+                const cells = row.cells;
+                for (let i = 0; i < buildings.length; i++) {
+                    const b = buildings[i];
+                    const info = this.data.savedData.buildings[city]?.[b.name] || { currentLevel: 0, targetLevel: null, upgrading: false };
+                    const currentLevel = info.currentLevel || 0;
+                    const targetLevel = info.targetLevel;
+                    const upgrading = info.upgrading || false;
+
+                    const cell = cells[i + 1];
+                    let newHtml = '';
+                    let newText = '';
+                    if (currentLevel === 0 && !upgrading) {
+                        newText = '-';
+                    } else if (upgrading && targetLevel !== null && targetLevel > 0) {
+                        newHtml = `<span class="building-arrow">${currentLevel} → ${targetLevel}</span>`;
+                    } else if (upgrading) {
+                        newText = currentLevel.toString();
+                    } else {
+                        newText = currentLevel.toString();
+                    }
+
+                    // Compare current content
+                    if (newHtml) {
+                        if (cell.innerHTML !== newHtml) {
+                            cell.innerHTML = newHtml;
+                            cell.classList.add('upgrading');
+                        }
+                    } else {
+                        if (cell.textContent !== newText) {
+                            cell.textContent = newText;
+                            cell.classList.remove('upgrading');
+                        }
+                    }
+                    totals[b.name] += currentLevel;
+                }
+                // Update star
+                const cityCell = cells[0];
+                const isCurrent = city === CityManager.getCurrentCityName();
+                const link = cityCell.querySelector('span');
+                if (link) {
+                    const newText = isCurrent ? `${city} ★` : city;
+                    if (link.textContent !== newText) link.textContent = newText;
+                }
+            }
+
+            if (this.totalRow) {
+                const totalCells = this.totalRow.cells;
+                for (let i = 0; i < buildings.length; i++) {
+                    const b = buildings[i];
+                    const value = totals[b.name];
+                    const cell = totalCells[i + 1];
+                    if (cell.textContent !== value.toString()) {
+                        cell.textContent = value;
+                    }
+                }
+            }
+        }
+
+        buildBuildingsTableFull(cities, buildings) {
+            this.rowMap.clear();
+            const table = this.table;
+            table.innerHTML = '';
+            const headerRow = table.insertRow();
+            headerRow.className = 'table-header';
+            headerRow.insertCell().textContent = 'City';
+            for (const b of buildings) {
+                const cell = headerRow.insertCell();
+                cell.innerHTML = `<img src="${Constants.IMAGE_PATHS.BUILDINGS}${b.icon}" class="building-icon" alt="${b.name}" title="${b.name}">`;
+            }
+            this.headerCells = Array.from(headerRow.cells);
+
+            const totals = {};
+            for (const b of buildings) totals[b.name] = 0;
 
             for (const city of cities) {
                 const row = table.insertRow();
@@ -703,11 +916,7 @@
                     if (currentLevel === 0 && !upgrading) {
                         cell.textContent = '-';
                     } else if (upgrading && targetLevel !== null && targetLevel > 0) {
-                        // Force LTR for the arrow to display correctly in RTL layouts
-                        const span = document.createElement('span');
-                        if (isRTL) span.setAttribute('dir', 'ltr');
-                        span.innerHTML = `${currentLevel} → ${targetLevel}`;
-                        cell.appendChild(span);
+                        cell.innerHTML = `<span class="building-arrow">${currentLevel} → ${targetLevel}</span>`;
                         cell.classList.add('upgrading');
                     } else if (upgrading) {
                         cell.textContent = currentLevel;
@@ -717,6 +926,7 @@
                     }
                     totals[b.name] += currentLevel;
                 }
+                this.rowMap.set(city, row);
             }
 
             const totalRow = table.insertRow();
@@ -725,15 +935,7 @@
             for (const b of buildings) {
                 totalRow.insertCell().textContent = totals[b.name];
             }
-        }
-
-        updateButtonStates() {
-            if (!this.buttons) return;
-            for (const button of this.buttons) {
-                button.className = button.textContent.toLowerCase() === this.data.currentView
-                    ? 'selected'
-                    : 'deselected';
-            }
+            this.totalRow = totalRow;
         }
     }
 
@@ -747,15 +949,6 @@
             this.debounceTimeout = null;
         }
 
-        /**
-         * Convert raw DOM data into stored format with correct totals.
-         * For a building type with an upgrade in progress:
-         *   - If completedSum > 0, it's an upgrade → targetLevel = raw.targetLevel + 1
-         *   - Otherwise, it's a new building → targetLevel = raw.targetLevel
-         * Then:
-         *   currentTotal = completedSum + (targetLevel - 1)
-         *   targetTotal = completedSum + targetLevel
-         */
         enrichBuildings(rawBuildings, previousBuildings) {
             const enriched = {};
             for (const name of Object.keys(rawBuildings)) {
@@ -765,16 +958,12 @@
 
                 if (raw.upgrading && raw.targetLevel !== null) {
                     upgrading = true;
-                    // Determine true target level: if there are existing buildings, it's an upgrade (+1)
                     let trueTarget = raw.targetLevel;
                     if (raw.completedSum > 0) {
-                        // Existing building(s) → upgrade, so tooltip shows current level
                         trueTarget = raw.targetLevel + 1;
                     }
-                    // Current total = finished buildings + (target level - 1)
                     const currentTotal = raw.completedSum + (trueTarget - 1);
                     const targetTotal = raw.completedSum + trueTarget;
-                    // Keep previous values if the upgrade is unchanged (same target)
                     if (prev.upgrading && prev.targetLevel === targetTotal) {
                         currentLevel = prev.currentLevel;
                         targetLevel = prev.targetLevel;
@@ -917,7 +1106,7 @@
                 left: this.grid.offsetLeft,
                 top: this.grid.offsetTop
             };
-            DataManager.save(this.data);
+            DataManager.savePosition(this.data.position);
             if (this.boundDrag) {
                 document.removeEventListener('mousemove', this.boundDrag);
                 this.boundDrag = null;
@@ -929,11 +1118,18 @@
         }
     }
 
-    $(document).ready(() => {
+    // Entry point – replace jQuery's $(document).ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+    function init() {
         const loadedData = DataManager.load();
         const gridUI = new GridUI(loadedData);
         new DragManager(gridUI.grid, loadedData);
         const updateManager = new UpdateManager(gridUI);
         updateManager.start();
-    });
+    }
 })();
