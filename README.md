@@ -31,6 +31,6 @@ A Violentmonkey script for Ikariam that tracks resources, military, and building
 ## Credits
 
 - **Author**: Kronos (AI‑generated)
-- All UI graphics styled after Ikariam
+- All UI graphics styled after Ikariam and IkaLogs
 
 **Disclaimer**: Unofficial fan project. Ikariam is property of Gameforge AG.
